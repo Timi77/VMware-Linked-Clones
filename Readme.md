@@ -2,7 +2,7 @@
 
 This script provides a mass cloning and deleting functionalities for the Linked Clones VMs
 
-This script consist of 2 parts: 
+This script consist of 2 parts:
 Part 1 provides the ability to create a Linked Clones VMs
 Part 2 provides the ability to delete all Linked Clones VMs from selected parent VM. It can only delete VMs that was created using this script
 
