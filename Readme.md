@@ -11,11 +11,7 @@ Part 2 provides the ability to delete all Linked Clones VMs from selected parent
 - Change your vCenter address and login credentials at the top of the script
 (change variables: $Lserver, $Luser, $Lpass)
 
-
-- You can enter new VM names by two ways: 
--- By loading from csv file 
-
--- By entering elements: prefix + NUMBER + suffix . In this case the script will generate VMs names from that 3 elements: prefix + NUMBER + suffix. The prefix and suffix parts are easy (you can leave them blank if you want). The sequence of numbers is constructed from ranges x-y and items x,y,z. The script provides you a small menu where you can combine any numbers of ranges and items tohether. This way you can easily deploy a VMs with names that are not part of one continual sequence of numbers in one go.
+- If you don't want to load the VM names from a csv file there is a second option. The script will generate VMs names from 3 elements: prefix + NUMBER + suffix. The prefix and suffix parts are easy (you can leave them blank if you want). The sequence of numbers is constructed from ranges x-y and items x,y,z... The script provides you a small menu where you can combine any numbers of ranges and items tohether. This way you can easily deploy a VMs with names that are not part of one continual sequence of numbers in one go.
 
 - You can run this script (Part 1) multiple times against one parent VM and every time the script adds Linked Clones VMs from actual state of that parent.
 But by running Part 2 of this script against a parent VM you will have no option but to delete all the "childs" of that parent VM (granularity of deleton I will intergate later, I hope...)
