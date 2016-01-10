@@ -9,21 +9,60 @@ Initial release v 1.0
 $listOnlyMultiHostDS = 'y'
 
 #address of Vcenter server:
-$Lserver = 'server.name.com'
+#Leave commented for entering during script run
+#$Lserver = 'server.name.com'
 
-#If you comment both $Luser and $lpass your windows session credentials will be used
-$Luser = 'domain\username'
-$Lpass = 'password'
+#Define your credentials for connection to vCenter
+#Leave commented $Luser,$Lpass for entering during script run
+#$Luser = 'domain\username'
+#$Lpass = 'password'
 
+#if you set $UseDomCred to 'yes' the above credentials will be ignored and your windows session credentials will be used
+$UseDomCred = 'no'
 
 ##########Stop edit at this point (end of settings area)
 
+##########Functions definition area
+Function Get-FileName($initialDirectory)
+{   
+ [System.Reflection.Assembly]::LoadWithPartialName("System.windows.forms") |
+ Out-Null
+
+ $OpenFileDialog = New-Object System.Windows.Forms.OpenFileDialog
+ $OpenFileDialog.initialDirectory = $initialDirectory
+ $OpenFileDialog.filter = "All files (*.*)| *.*"
+ $OpenFileDialog.ShowDialog() | Out-Null
+ $OpenFileDialog.filename
+} #end function Get-FileName
+
+##########End of functions definition area
+
+if (!$Lserver) {
+	$Lserver = Read-Host "Enter address of vCenter server"
+}
+
+if ($UseDomCred -ne 'yes'){
+	if (!$Luser){
+		$Luser = Read-Host "Enter username for login in format domain\username"
+	}
+	if (!$Lpass){
+		$Lpass = Read-Host "Enter password for login" -AsSecureString
+		$Lpass = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($Lpass))
+	}
+}else{
+	Remove-Variable Luser
+	Remove-Variable Lpass
+}
+
+echo $Lpass
+
+echo "Connecting to vCenter..."
 Import-Module VMware.VimAutomation.Core
 $connection = Connect-VIServer -Server $Lserver -User $Luser -Password $Lpass
 
 if ($connection.IsConnected -eq 'True'){$connection} 
 else {
-	echo "Exitting - connection to the server does NOT exist"
+	Read-Host "*** Exitting - connection to the server does NOT exist ***"
 	exit
 }
 
@@ -41,38 +80,65 @@ switch ($mainSelect){
 
 		echo ""
 		echo "***CLONE VMs SCRIPT***"
-		echo "New VMs will be named by scema prefix+number+suffix"
-		$prefix = (Read-Host "Please enter a prefix")
+		echo "How do you want to enter the new VM names ?"
+		echo "1 = Generate them manually as prefix+number+suffix"
+		echo "2 = Load from a csv file"
+		$VMnamesMethod = (Read-Host "Specify action [number]")
+		switch ($VMnamesMethod){
+			1 {
+				echo "New VMs will be named by scema prefix+number+suffix"
+				$prefix = (Read-Host "Please enter a prefix")
 
-		echo ""
-		echo "***NUMBERS***"
-		echo "Please provide a sequence for numbering (you can add multiple structures together sequences+items)"
-		while($Nmode -ne 'q'){
+				echo ""
+				echo "***NUMBERS***"
+				echo "Please provide a sequence for numbering (you can add multiple structures together sequences+items)"
+				while($Nmode -ne 'q'){
 
-			echo "Choose input type s= sequence (x-y); i= items(x,y,z); q= stop inputing numbers"
+					echo "Choose input type s= sequence (x-y); i= items(x,y,z); q= stop inputing numbers"
 
-			$Nmode = (Read-Host)
-			if ($Nmode -eq 's') {
-				$ArrayBorders =(Read-Host "Enter range (separate with -)").split('-') | % {$_.trim()}
-				$numArray += ($ArrayBorders[0]..$ArrayBorders[1])
-				} 
-		else {
-			if($Nmode -eq 'i'){
-				$numArray +=(Read-Host "Enter numbers (separate with comma)").split(',') | % {$_.trim()}
+					$Nmode = (Read-Host)
+					if ($Nmode -eq 's') {
+						$ArrayBorders =(Read-Host "Enter range (separate with -)").split('-') | % {$_.trim()}
+						$numArray += ($ArrayBorders[0]..$ArrayBorders[1])
+					} 
+					else {
+						if($Nmode -eq 'i'){
+							$numArray +=(Read-Host "Enter numbers (separate with comma)").split(',') | % {$_.trim()}
+						}
+					}
 				}
-			}
-		}
 
-		$suffix = (Read-Host "Please enter a suffix")
+				$suffix = (Read-Host "Please enter a suffix")
 
-		$newVMNames = @()
-		foreach ($element in $numArray) {
-			$newVMNames += $prefix + $element + $suffix
-		}
+				$newVMNames = @()
+				foreach ($element in $numArray) {
+					$newVMNames += $prefix + $element + $suffix
+				}
+			
+			} #end of VMnamesMethod 1
+			2 {
+				echo "Select the csv file"
+				$CurrLocation = Get-Location
+				$csvFilePath = Get-FileName -initialDirectory $CurrLocation
+				echo "Selected file: $csvFilePath"
+				$csvFile = IMPORT-CSV -Path $csvFilePath -Header vmnames
+				$newVMNames = @()
+				foreach ($element in $csvFile.vmnames){
+					$newVMNames += $element
+				}
+				if ($newVMNames.Count -eq 0){
+					Echo "Unable to load VM names from file"
+					Read-Host "Exiting now ..."
+					exit
+				}
+			}#end of VMnamesMethod 2
+			
+		} #end of VMnamesMethod switch
+		
 		echo ""
 		echo "The new VM names are:"
 		echo $newVMNames
-
+		
 		echo ""
 		$n = 0
 		foreach ($element in $newVMNames) {
@@ -87,7 +153,7 @@ switch ($mainSelect){
 		if($n -gt 0){
 			$delAns = (Read-Host "There are VMs that will be deleted (and replaced) before cloning ARE YOU SURE? (y/n) [default = n]")
 			if (($delAns -ne 'y') -and ($delAns -ne 'Y') -and ($delAns -ne 'yes')){
-				echo "*** Exiting without changes ***"
+				Read-Host "*** Exiting without changes ***"
 				exit
 			}
 		}
@@ -131,18 +197,7 @@ switch ($mainSelect){
 		$HOSTselect = Read-Host "Enter the number of the host you wish to create the VM on [number] or [a]"
 
 		if (($HOSTselect -eq 'a') -or ($HOSTselect -eq '')){
-			$MAXfreeRAM = 0
-					
-			foreach ($element in $myHosts){
-				$freeRAM = $element.MemoryTotalMB - $element.MemoryUsageMB
-				if($freeRAM -gt $MAXfreeRAM){
-					$MAXfreeRAM = $freeRAM
-					$HOSTName = $element
-				}
-			}
-			Echo "Clones will be created on $HOSTName"
-		} else {
-		$HOSTName = $myHosts[$HOSTselect - 1]
+			Echo "Clones will be evenly distributed across Hosts"
 		}
 
 		echo ""
@@ -222,6 +277,12 @@ switch ($mainSelect){
 		} else {
 			$powerONAnsNice = 'no'
 		}
+		
+		if (($HOSTselect -eq 'a') -or ($HOSTselect -eq '')){
+			$HOSTNameShow = "Automatic selection"
+		} else {
+			$HOSTNameShow = $myHosts[$HOSTselect - 1]
+		}
 
 		Write-Host ""
 		Write-Host '**************** SUMMARY **************'
@@ -229,7 +290,7 @@ switch ($mainSelect){
 		Write-Host '**************************************'
 		Write-Host "* VM names         * ${prefix}(n)${suffix}"
 		Write-Host "**************************************"
-		Write-Host "* Host             * $HOSTName"
+		Write-Host "* Host             * $HOSTNameShow"
 		Write-Host "**************************************"
 		Write-Host "* Datastore        * $Datastore"
 		Write-Host "**************************************"
@@ -245,7 +306,7 @@ switch ($mainSelect){
 		$sumAns = (Read-Host "Is everything OK? (y/n) [default = y]")
 		
 		if (($sumAns -ne 'y') -and ($sumAns -ne 'Y') -and ($sumAns -ne 'yes') -and ($sumAns -ne '')){
-			echo "*** Exiting without changes ***"
+			Read-Host "*** Exiting without changes ***"
 			exit
 		}
 		
@@ -285,7 +346,23 @@ switch ($mainSelect){
 				}
 			Remove-VM -VM $actualRem -Confirm:$false -DeletePermanently:$true
 			}
-	
+			
+			if (($HOSTselect -eq 'a') -or ($HOSTselect -eq '')){
+			$MAXfreeRAM = 0
+			# $myHosts = Get-VMHost
+			foreach ($elementH in $myHosts){
+				$freeRAM = $elementH.MemoryTotalMB - $elementH.MemoryUsageMB
+				if($freeRAM -gt $MAXfreeRAM){
+					$MAXfreeRAM = $freeRAM
+					$HOSTName = $elementH
+				}
+			}
+			} else {
+				$HOSTName = $myHosts[$HOSTselect - 1]
+			}
+			
+			Echo "Creating $element on $HOSTName"
+
 			$actualVM = New-VM -VM $oldVM -Name $element -VMHost $HOSTName -Location $folder.Name -Datastore $Datastore -LinkedClone:$true -ReferenceSnapshot $oldVMsnap  -OSCustomizationSpec $OSspec
 			if ($powerONAnsNice -eq 'yes'){
 				Start-VM -VM $actualVM | Format-Table
@@ -356,11 +433,13 @@ switch ($mainSelect){
 			echo "***FINISHED***"
 	
 		} else {
-			echo "***Exiting without deleting***"
+			Read-Host "*** Exiting without changes ***"
 		}
 
 	} #End of  deleting module
 
 } #End of switch
+
+
 
 exit
