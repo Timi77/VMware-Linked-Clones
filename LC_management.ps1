@@ -35,6 +35,29 @@ Function Get-FileName($initialDirectory)
  $OpenFileDialog.filename
 } #end function Get-FileName
 
+function Generate-OScustom-ip
+{
+	param ($oscustom, $ipdata, [int]$offset)
+	
+	$tmposcustom = New-OSCustomizationSpec -OSCustomizationSpec $oscustom –Type NonPersistent
+	
+	[int]$ip_end = [int]$ipdata.ipaddress.split(".")[3] + [int]$offset
+	[string]$ipdata.ipaddress_actual = $ipdata.ipaddress.split(".")[0] + '.' + $ipdata.ipaddress.split(".")[1] + '.' + $ipdata.ipaddress.split(".")[2] + '.' + $ip_end
+	
+	$nicMapping = Get-OSCustomizationNicMapping –OSCustomizationSpec $tmposcustom | where { $_.Position –eq 1 }
+	$nicMapping | Remove-OSCustomizationNicMapping -Confirm:$false
+	if ($tmposcustom.OSType -eq "Windows")
+	{
+		$nicMapping = New-OSCustomizationNicMapping –OSCustomizationSpec $tmposcustom –IpMode UseStaticIP –IpAddress $ipdata.ipaddress_actual –SubnetMask $ipdata.subnet –DefaultGateway $ipdata.gateway –Dns $ipdata.dns
+	}
+	if ($tmposcustom.OSType -eq "Linux")
+	{
+		$nicMapping = New-OSCustomizationNicMapping –OSCustomizationSpec $tmposcustom –IpMode UseStaticIP –IpAddress $ipdata.ipaddress_actual –SubnetMask $ipdata.subnet –DefaultGateway $ipdata.gateway
+	}
+	
+	return $tmposcustom
+}
+
 ##########End of functions definition area
 
 if (!$Lserver) {
@@ -53,8 +76,6 @@ if ($UseDomCred -ne 'yes'){
 	Remove-Variable Luser
 	Remove-Variable Lpass
 }
-
-echo $Lpass
 
 echo "Connecting to vCenter..."
 Import-Module VMware.VimAutomation.Core
@@ -268,6 +289,15 @@ switch ($mainSelect){
 		
 		if($OSspecSelect -ne 'n'){
 			$OSspec = $OSspecs[$OSspecSelect - 1]
+			$staticIPSelect = Read-Host "Do you want to set static IP addresses ? [default = n]"
+			if ($staticIPSelect -eq 'y')
+			{
+				$ipdata = @{}
+				$ipdata.ipaddress = Read-Host "Enter first IP v4 address"
+				$ipdata.subnet = Read-Host "Enter subnet in format xxx.xxx.xxx.xxx"
+				$ipdata.gateway = Read-Host "Enter default gateway"
+				$ipdata.dns = Read-Host "Enter DNS server address (will apply only on windows)"
+			}
 		}
 
 		echo ""
@@ -332,43 +362,62 @@ switch ($mainSelect){
 		
 		
 		$oldVMsnap = New-Snapshot -VM $oldVM -Name linked_clone -Confirm:$false -Description "This snapshot is actively used by Linked clones. !!!DO NOT DELETE!!!"
-
-
-		foreach ($element in $newVMNames){
-
+		
+		[int]$ipoffset = 0
+		foreach ($element in $newVMNames)
+		{
+			
 			$ErrorActionPreference = "SilentlyContinue"
 			$actualRem = Get-VM -Name $element
 			$ErrorActionPreference = ""
-	
-			if($actualRem){
-				if($actualRem.PowerState -eq 'PoweredOn'){
+			
+			if ($actualRem)
+			{
+				if ($actualRem.PowerState -eq 'PoweredOn')
+				{
 					Stop-VM -VM $actualRem -Confirm:$false | Format-Table
 				}
-			Remove-VM -VM $actualRem -Confirm:$false -DeletePermanently:$true
+				Remove-VM -VM $actualRem -Confirm:$false -DeletePermanently:$true
 			}
 			
-			if (($HOSTselect -eq 'a') -or ($HOSTselect -eq '')){
-			$MAXfreeRAM = 0
-			# $myHosts = Get-VMHost
-			foreach ($elementH in $myHosts){
-				$freeRAM = $elementH.MemoryTotalMB - $elementH.MemoryUsageMB
-				if($freeRAM -gt $MAXfreeRAM){
-					$MAXfreeRAM = $freeRAM
-					$HOSTName = $elementH
+			if (($HOSTselect -eq 'a') -or ($HOSTselect -eq ''))
+			{
+				$MAXfreeRAM = 0
+				# $myHosts = Get-VMHost
+				foreach ($elementH in $myHosts)
+				{
+					$freeRAM = $elementH.MemoryTotalMB - $elementH.MemoryUsageMB
+					if ($freeRAM -gt $MAXfreeRAM)
+					{
+						$MAXfreeRAM = $freeRAM
+						$HOSTName = $elementH
+					}
 				}
 			}
-			} else {
+			else
+			{
 				$HOSTName = $myHosts[$HOSTselect - 1]
 			}
 			
 			Echo "Creating $element on $HOSTName"
-
-			$actualVM = New-VM -VM $oldVM -Name $element -VMHost $HOSTName -Location $folder.Name -Datastore $Datastore -LinkedClone:$true -ReferenceSnapshot $oldVMsnap  -OSCustomizationSpec $OSspec
+			
+			if ($staticIPSelect -eq "y")
+			{
+				$tmposspec = Generate-OScustom-ip -oscustom $OSspec -ipdata $ipdata -offset $ipoffset
+				$actualVM = New-VM -VM $oldVM -Name $element -VMHost $HOSTName -Location $folder.Name -Datastore $Datastore -LinkedClone:$true -ReferenceSnapshot $oldVMsnap -OSCustomizationSpec $tmposspec
+				Remove-OSCustomizationSpec -OSCustomizationSpec $tmposspec -Confirm:$false
+			}
+			else
+			{
+				$actualVM = New-VM -VM $oldVM -Name $element -VMHost $HOSTName -Location $folder.Name -Datastore $Datastore -LinkedClone:$true -ReferenceSnapshot $oldVMsnap -OSCustomizationSpec $OSspec
+			}
+			
 			if ($powerONAnsNice -eq 'yes'){
 				Start-VM -VM $actualVM | Format-Table
 			}
+			$ipoffset++
 		}
-
+		
 		Echo "***FINNISHED***"
 
 	} #End of Cloning module
